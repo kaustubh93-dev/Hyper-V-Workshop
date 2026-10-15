@@ -1,0 +1,65 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "value": "eastus2"
+        },
+        "hostCount": {
+            "value": 2
+        },
+        "namePrefix": {
+            "value": "HYD-HOST"
+        },
+        "vmSize": {
+            "value": "Standard_E4s_v5"
+        },
+        "adminUsername": {
+            "value": "labadmin"
+        },
+        "zone": {
+            "value": "1"
+        },
+        "osDiskType": {
+            "value": "Premium_LRS"
+        },
+        "dataDiskSizeGB": {
+            "value": 1024
+        },
+        "dataDiskSku": {
+            "value": "Premium_LRS"
+        },
+        "vnetName": {
+            "value": "vnet-hyperv-training"
+        },
+        "vnetAddressPrefix": {
+            "value": "172.16.0.0/16"
+        },
+        "subnetName": {
+            "value": "snet-hosts"
+        },
+        "subnetPrefix": {
+            "value": "172.16.0.0/24"
+        },
+        "autoShutdownTime": {
+            "value": "21:00"
+        },
+        "autoShutdownTimeZone": {
+            "value": "India Standard Time"
+        },
+        "autoShutdownNotificationEmail": {
+            "value": ""
+        },
+        "server2025IsoUrl": {
+            "value": ""
+        },
+        "nestedNatPrefix": {
+            "value": "192.168.100.0/24"
+        },
+        "tags": {
+            "value": {
+                "purpose": "hyperv-training"
+            }
+        }
+    }
+}
