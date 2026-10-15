@@ -47,6 +47,35 @@ function Invoke-MSLabStep([string]$Script) {
     Set-Status "FINISHED $Script exit=$($proc.ExitCode)"
 }
 
+# Storage VLANs have no DHCP, so nodes would otherwise sit on APIPA addresses
+function Set-NodeStorageIp {
+    $cred = New-Object PSCredential('CORP\LabAdmin', (ConvertTo-SecureString $AdminPassword -AsPlainText -Force))
+    $subnets = [ordered]@{ Storage1 = '10.10.1'; Storage2 = '10.10.2' }
+    foreach ($vm in Get-VM -Name 'MSLab-Node*' | Sort-Object Name) {
+        $nodeNumber = [int]($vm.Name -replace '\D')
+        $deadline = (Get-Date).AddMinutes(20)
+        while ($true) {
+            try { Invoke-Command -VMName $vm.Name -Credential $cred -ScriptBlock { $true } -ErrorAction Stop | Out-Null; break }
+            catch {
+                if ((Get-Date) -gt $deadline) { throw "$($vm.Name) not reachable via PowerShell Direct: $_" }
+                Start-Sleep -Seconds 30
+            }
+        }
+        foreach ($net in $subnets.Keys) {
+            $mac = (Get-VMNetworkAdapter -VM $vm -Name $net).MacAddress -replace '(..)(?!$)', '$1-'
+            Invoke-Command -VMName $vm.Name -Credential $cred -ArgumentList $mac, $net, "$($subnets[$net]).$nodeNumber" -ScriptBlock {
+                param($Mac, $Name, $Ip)
+                $nic = Get-NetAdapter | Where-Object MacAddress -eq $Mac
+                if ($nic.Name -ne $Name) { Rename-NetAdapter -Name $nic.Name -NewName $Name }
+                if (-not (Get-NetIPAddress -InterfaceAlias $Name -IPAddress $Ip -ErrorAction SilentlyContinue)) {
+                    New-NetIPAddress -InterfaceAlias $Name -IPAddress $Ip -PrefixLength 24 | Out-Null
+                }
+            }
+        }
+        Set-Status "STORAGE IPs set on $($vm.Name): 10.10.1.$nodeNumber, 10.10.2.$nodeNumber"
+    }
+}
+
 function New-LabConfigContent {
     $pw = $AdminPassword.Replace("'", "''")
     @"
@@ -149,6 +178,7 @@ try {
     if (-not (Get-VM -Name 'MSLab-DC' -ErrorAction SilentlyContinue)) {
         throw "MSLab-DC VM not found after Deploy. Check transcripts in $labRoot."
     }
+    Set-NodeStorageIp
 
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     Set-Status "COMPLETE VMs: $((Get-VM -Name 'MSLab-*').Name -join ', ')"

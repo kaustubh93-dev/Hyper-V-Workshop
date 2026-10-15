@@ -1,6 +1,6 @@
 # Hyper-V Workshop Lab on Azure
 
-On-demand Hyper-V training lab: Windows Server 2025 Azure VMs with nested virtualization, ready to host nested Windows Server 2025 guests.
+On-demand Hyper-V training lab: Windows Server 2025 Azure VMs with nested virtualization. Each host can be pre-built with an MSLab domain controller and Windows Server 2025 guest VMs so students start straight on nodes, networking and clustering.
 
 ## Deploy
 
@@ -36,18 +36,49 @@ Connect-AzAccount
 | Host setup | Run Command executes [scripts/setup-host.ps1](scripts/setup-host.ps1): installs Hyper-V, reboots, creates `InternalNAT` internal switch + NAT (`192.168.0.0/24`, gateway `.1`) and a DHCP scope (`.100-.199`) |
 | MSLab (`-WithMSLab`) | [scripts/mslab-host.ps1](scripts/mslab-host.ps1) on each host: MSLab v26.07.1, Server 2025 eval ISO, parent disks, `MSLab-DC` (`corp.contoso.com`) and `MSLab-Node1..3` (5 GB, 2 vCPU, 4x100 GB disks, `Storage1`/`Storage2` networks) |
 
-## MSLab
+## MSLab: domain controller and guest VMs
 
-Hydration runs in a background task on each host (~1.5 h). Start it after deploy, or rerun it if interrupted:
+`-WithMSLab` (or `deploy-mslab.ps1`) uses [MSLab](https://github.com/microsoft/MSLab) to build a ready-to-use lab on **each** host:
+
+1. Downloads MSLab v26.07.1 and the Windows Server 2025 evaluation ISO.
+2. Converts the ISO into parent (differencing) disks: `Win2025_G2.vhdx` (Desktop Experience) and `Win2025Core_G2.vhdx` (Server Core).
+3. Builds and promotes the domain controller `MSLab-DC` for `corp.contoso.com` (DNS, DHCP, NAT to the internet).
+4. Creates the guest VMs `MSLab-Node1..3` from the Core parent disk and joins them to the domain.
+
+### Lab layout (per host)
+
+| VM | OS | vCPU / RAM | Disks | Network |
+|---|---|---|---|---|
+| `MSLab-DC` | Server 2025 Datacenter (GUI) | 2 / 2 GB | OS | `Internet` 192.168.0.2 (InternalNAT), `Management1` 10.0.0.1 |
+| `MSLab-Node1..3` | Server 2025 Core | 2 / 5 GB | OS + 4 x 100 GB (for S2D) | `Management1/2` DHCP 10.0.0.x, `Storage1` 10.10.1.N (VLAN 1), `Storage2` 10.10.2.N (VLAN 2) |
+
+| Switch | Type | Purpose |
+|---|---|---|
+| `InternalNAT` | Internal | Host NAT to the internet (192.168.0.0/24); only the DC is attached |
+| `MSLab-LabSwitch` | Private | Lab network: management 10.0.0.0/24 plus Storage1/Storage2 VLANs |
+
+The storage VLANs have no DHCP server, so after Deploy the script renames each node's storage NICs to `Storage1`/`Storage2` and assigns static IPs (`NodeN` gets `10.10.1.N` and `10.10.2.N`, /24). Without this they would sit on APIPA (169.254.x.x) addresses. Students can go straight to SET switches, clustering and S2D.
+
+**Credentials:** `CORP\LabAdmin` / `LS1setup!` (domain and local Administrator).
+
+### Run and monitor
+
+Hydration runs as a background task on each host (~1.5 h). Start it after deploy, or rerun it to resume if interrupted:
 
 ```powershell
 ./scripts/deploy-mslab.ps1 -ResourceGroupName rg-hyperv-training-eus2           # start / resume
 ./scripts/deploy-mslab.ps1 -ResourceGroupName rg-hyperv-training-eus2 -Status   # expect COMPLETE VMs: MSLab-DC, MSLab-Node1..3
 ```
 
-Logs: `C:\MSLabSetup\status.txt`, `C:\MSLabSetup\mslab-host.log`, `V:\MSLab\*.log`. Lab credentials: `CORP\LabAdmin` / `LS1setup!`. The DC routes to the internet through `InternalNAT` (static `192.168.0.2`).
+Logs: `C:\MSLabSetup\status.txt`, `C:\MSLabSetup\mslab-host.log`, `V:\MSLab\*.log`. Start before ~19:00 IST so the 21:00 auto-shutdown doesn't interrupt hydration. Change node count or memory with `-NodeCount` (0-6) and `-NodeMemoryGB` (2-16).
 
-Start before ~19:00 IST so the 21:00 auto-shutdown doesn't interrupt hydration.
+### Student access
+
+1. Azure portal > `HYD-HOST-1` (or `-2`) > **Connect > Bastion**, sign in as `labadmin`.
+2. Open **Hyper-V Manager** and connect to `MSLab-DC` (or a node) with `CORP\LabAdmin` / `LS1setup!`.
+3. Manage nodes from the DC (Server Manager, Failover Cluster Manager, PowerShell remoting). Guest computer names drop the `MSLab-` prefix, e.g. `Enter-PSSession Node1`.
+
+To add more guests, edit `V:\MSLab\LabConfig.ps1` on the host and run `V:\MSLab\Deploy.ps1` again; existing VMs are kept.
 
 ## After deployment
 
