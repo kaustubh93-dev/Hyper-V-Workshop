@@ -4,13 +4,12 @@
     Prepares an Azure VM as a Hyper-V host for nested Windows Server 2025 guests.
 .DESCRIPTION
     Runs via Azure managed Run Command as SYSTEM. Formats the data disk as V:, installs Hyper-V,
-    then (after one reboot) creates a NAT switch for guests and optionally downloads the
-    Server 2025 evaluation ISO. Safe to re-run. Logs to C:\HyperVSetup.
+    then (after one reboot) creates the InternalNAT switch, NAT and DHCP scope for guests.
+    Safe to re-run. Logs to C:\HyperVSetup.
 #>
 [CmdletBinding()]
 param(
-    [string]$NatPrefix = '192.168.100.0/24',
-    [string]$IsoUrl = ''
+    [string]$NatPrefix = '192.168.0.0/24'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,7 +19,8 @@ $taskName = 'HyperVPostReboot'
 $postRebootScript = @'
 $ErrorActionPreference = 'Stop'
 $root = 'C:\HyperVSetup'
-$switchName = 'NestedNAT'
+# MSLab's Azure path reuses an existing 'InternalNAT' switch on 192.168.0.0/24 (only one NetNat is allowed per host)
+$switchName = 'InternalNAT'
 Start-Transcript -Path (Join-Path $root 'post-reboot.log') -Append | Out-Null
 try {
     $cfg = Get-Content (Join-Path $root 'config.json') -Raw | ConvertFrom-Json
@@ -41,25 +41,26 @@ try {
 
     $network, $prefixLength = $cfg.NatPrefix.Split('/')
     $octets = $network.Split('.')
-    $gateway = '{0}.{1}.{2}.{3}' -f $octets[0], $octets[1], $octets[2], ([int]$octets[3] + 1)
+    $base = '{0}.{1}.{2}' -f $octets[0], $octets[1], $octets[2]
+    $gateway = "$base.1"
     if (-not (Get-NetIPAddress -IPAddress $gateway -ErrorAction SilentlyContinue)) {
         $ifIndex = (Get-NetAdapter -Name "vEthernet ($switchName)").ifIndex
         New-NetIPAddress -IPAddress $gateway -PrefixLength ([byte]$prefixLength) -InterfaceIndex $ifIndex | Out-Null
     }
-    if (-not (Get-NetNat -Name $switchName -ErrorAction SilentlyContinue)) {
+    if (-not (Get-NetNat | Where-Object InternalIPInterfaceAddressPrefix -eq $cfg.NatPrefix)) {
         New-NetNat -Name $switchName -InternalIPInterfaceAddressPrefix $cfg.NatPrefix | Out-Null
     }
 
-    Set-VMHost -VirtualHardDiskPath 'V:\VMs' -VirtualMachinePath 'V:\VMs'
-
-    if ($cfg.IsoUrl) {
-        $iso = 'V:\ISO\WindowsServer2025-Eval.iso'
-        if (-not (Test-Path $iso)) {
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $cfg.IsoUrl -OutFile "$iso.partial" -UseBasicParsing
-            Move-Item -Path "$iso.partial" -Destination $iso -Force
-        }
+    # Guests get .100-.199 via DHCP; .2-.99 stay free for static IPs (MSLab DC takes .2)
+    if (-not (Get-WindowsFeature DHCP).Installed) {
+        Install-WindowsFeature -Name DHCP -IncludeManagementTools | Out-Null
     }
+    if (-not (Get-DhcpServerv4Scope -ScopeId "$base.0" -ErrorAction SilentlyContinue)) {
+        Add-DhcpServerv4Scope -Name $switchName -StartRange "$base.100" -EndRange "$base.199" -SubnetMask 255.255.255.0 | Out-Null
+        Set-DhcpServerv4OptionValue -ScopeId "$base.0" -Router $gateway -DnsServer 168.63.129.16 -Force | Out-Null
+    }
+
+    Set-VMHost -VirtualHardDiskPath 'V:\VMs' -VirtualMachinePath 'V:\VMs'
 
     Unregister-ScheduledTask -TaskName 'HyperVPostReboot' -Confirm:$false -ErrorAction SilentlyContinue
     Set-Content -Path (Join-Path $root 'status.txt') -Value "COMPLETE $(Get-Date -Format o) gateway=$gateway"
@@ -76,11 +77,8 @@ finally {
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 Start-Transcript -Path (Join-Path $root 'setup.log') -Append | Out-Null
 try {
-    if ($NatPrefix -notmatch '^(\d{1,3}\.){3}\d{1,3}/(1[6-9]|2[0-9])$') {
-        throw "Invalid NatPrefix '$NatPrefix'. Expected an IPv4 CIDR between /16 and /29."
-    }
-    if ($IsoUrl -and -not $IsoUrl.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'IsoUrl must be an https:// URL.'
+    if ($NatPrefix -notmatch '^(\d{1,3}\.){3}0/24$') {
+        throw "Invalid NatPrefix '$NatPrefix'. Expected an IPv4 /24 network such as 192.168.0.0/24."
     }
 
     if (-not (Get-Volume -DriveLetter V -ErrorAction SilentlyContinue)) {
@@ -92,9 +90,9 @@ try {
             Format-Volume -FileSystem NTFS -NewFileSystemLabel 'HyperV' -AllocationUnitSize 65536 -Confirm:$false |
             Out-Null
     }
-    'V:\VMs', 'V:\ISO' | ForEach-Object { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
+    New-Item -ItemType Directory -Path 'V:\VMs' -Force | Out-Null
 
-    @{ NatPrefix = $NatPrefix; IsoUrl = $IsoUrl } | ConvertTo-Json | Set-Content -Path (Join-Path $root 'config.json') -Encoding UTF8
+    @{ NatPrefix = $NatPrefix } | ConvertTo-Json | Set-Content -Path (Join-Path $root 'config.json') -Encoding UTF8
     $postScriptPath = Join-Path $root 'post-reboot.ps1'
     Set-Content -Path $postScriptPath -Value $postRebootScript -Encoding UTF8
 

@@ -4,7 +4,7 @@
     Stops or removes the Hyper-V training lab.
 .DESCRIPTION
     Default deletes the whole resource group (stops all charges).
-    -StopOnly deallocates the hosts; managed disks and public IPs keep billing.
+    -StopOnly deallocates the hosts; managed disks keep billing.
 #>
 [CmdletBinding()]
 param(
@@ -31,7 +31,7 @@ if ($StopOnly) {
         Write-Host "Deallocating $($vm.Name)..."
         Stop-AzVM -ResourceGroupName $ResourceGroupName -Name $vm.Name -Force | Out-Null
     }
-    Write-Host 'Hosts deallocated. Disks and public IPs still incur charges.' -ForegroundColor Yellow
+    Write-Host 'Hosts deallocated. Managed disks still incur charges.' -ForegroundColor Yellow
     return
 }
 

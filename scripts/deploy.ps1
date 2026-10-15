@@ -5,15 +5,19 @@
 .EXAMPLE
     ./deploy.ps1 -WhatIf
 .EXAMPLE
-    ./deploy.ps1 -Server2025IsoUrl 'https://go.microsoft.com/fwlink/?linkid=<from-eval-center>'
+    ./deploy.ps1 -WithMSLab    # full rebuild: hosts + MSLab DC and nodes
 #>
 [CmdletBinding()]
 param(
     [string]$SubscriptionId,
     [string]$ResourceGroupName = 'rg-hyperv-training-eus2',
     [string]$Location = 'eastus2',
-    [string]$Server2025IsoUrl,
     [securestring]$AdminPassword,
+    [switch]$WithMSLab,
+    [ValidateRange(0, 6)]
+    [int]$NodeCount = 3,
+    [ValidateRange(2, 16)]
+    [int]$NodeMemoryGB = 5,
     [switch]$WhatIf
 )
 
@@ -79,7 +83,6 @@ $deployment = @{
     adminPassword         = $AdminPassword
     hostSetupScript       = Get-Content $setupScriptFile -Raw
 }
-if ($Server2025IsoUrl) { $deployment.server2025IsoUrl = $Server2025IsoUrl }
 
 if ($WhatIf) {
     New-AzResourceGroupDeployment @deployment -WhatIf
@@ -97,6 +100,14 @@ $hosts = @($result.Outputs['hosts'].Value)
 foreach ($labHost in $hosts) {
     Write-Host ("  {0}  private IP {1}" -f $labHost.name, $labHost.privateIp)
 }
+# Defender JIT can strip the Bastion RDP rule right after the NSG is created
+& (Join-Path $PSScriptRoot 'fix-bastion-nsg.ps1') -ResourceGroupName $ResourceGroupName -NsgName "$($fileParams.namePrefix.value)-nsg"
+
+if ($WithMSLab) {
+    & (Join-Path $PSScriptRoot 'deploy-mslab.ps1') -ResourceGroupName $ResourceGroupName `
+        -VMName ($hosts | ForEach-Object { $_.name }) -NodeCount $NodeCount -NodeMemoryGB $NodeMemoryGB
+}
+
 Write-Host "`nConnect: Azure portal > VM > Connect > Bastion (Developer SKU, free, one session at a time)."
 Write-Host "`nVerify on each host: Get-Content C:\HyperVSetup\status.txt  (expect COMPLETE)"
 Write-Host "Cost: ~`$0.87/hour for both hosts while running; 1 TB Premium disks bill even when stopped. Run teardown.ps1 when done." -ForegroundColor Yellow

@@ -50,11 +50,8 @@
         "autoShutdownNotificationEmail": {
             "value": ""
         },
-        "server2025IsoUrl": {
-            "value": ""
-        },
         "nestedNatPrefix": {
-            "value": "192.168.100.0/24"
+            "value": "192.168.0.0/24"
         },
         "tags": {
             "value": {

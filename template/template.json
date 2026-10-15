@@ -111,16 +111,9 @@
             "type": "string",
             "defaultValue": "https://raw.githubusercontent.com/kaustubh93-dev/Hyper-V-Workshop/main/scripts/setup-host.ps1"
         },
-        "server2025IsoUrl": {
-            "type": "string",
-            "defaultValue": "",
-            "metadata": {
-                "description": "HTTPS link to the Windows Server 2025 evaluation ISO. Empty skips the download."
-            }
-        },
         "nestedNatPrefix": {
             "type": "string",
-            "defaultValue": "192.168.100.0/24"
+            "defaultValue": "192.168.0.0/24"
         },
         "tags": {
             "type": "object",
@@ -131,12 +124,7 @@
     },
     "variables": {
         "nsgName": "[format('{0}-nsg', parameters('namePrefix'))]",
-        "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), parameters('subnetName'))]",
-        "natParameter": {
-            "name": "NatPrefix",
-            "value": "[parameters('nestedNatPrefix')]"
-        },
-        "runCommandParameters": "[if(empty(parameters('server2025IsoUrl')), createArray(variables('natParameter')), createArray(variables('natParameter'), createObject('name', 'IsoUrl', 'value', parameters('server2025IsoUrl'))))]"
+        "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), parameters('subnetName'))]"
     },
     "resources": [
         {
@@ -369,7 +357,12 @@
             ],
             "properties": {
                 "source": "[if(empty(parameters('hostSetupScript')), createObject('scriptUri', parameters('hostSetupScriptUri')), createObject('script', parameters('hostSetupScript')))]",
-                "parameters": "[variables('runCommandParameters')]",
+                "parameters": [
+                    {
+                        "name": "NatPrefix",
+                        "value": "[parameters('nestedNatPrefix')]"
+                    }
+                ],
                 "asyncExecution": false,
                 "timeoutInSeconds": 3600,
                 "treatFailureAsDeploymentFailure": true
