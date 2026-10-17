@@ -103,6 +103,9 @@ Defender for Cloud JIT on some subscriptions removes the NSG rule that lets Bast
 Roughly $0.87/hour for two hosts while running. The 1 TB Premium disks bill even when the VMs are stopped.
 
 ```powershell
-./scripts/teardown.ps1 -ResourceGroupName <rg>            # delete everything
+./scripts/start-lab.ps1                                   # start hosts + MSLab VMs (use this instead of the portal Start button)
 ./scripts/teardown.ps1 -ResourceGroupName <rg> -StopOnly  # deallocate hosts only
+./scripts/teardown.ps1 -ResourceGroupName <rg>            # delete everything
 ```
+
+`start-lab.ps1` handles Azure capacity shortages: if `Standard_E4s_v5` isn't available in the zone, it resizes the stopped host to the next nested-virtualization size (`E4s_v4`, `D8s_v5`, `D8s_v4`, `E8s_v5`) and retries. Lab VMs are set to shut down (not save state) with the host and auto-start with it, DC first, so they boot cleanly even on a different CPU after a resize.

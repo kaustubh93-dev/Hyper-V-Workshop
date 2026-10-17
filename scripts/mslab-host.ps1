@@ -76,6 +76,19 @@ function Set-NodeStorageIp {
     }
 }
 
+# Saved state can't be restored if the host restarts on a different CPU (resize or reallocation), so shut down instead
+function Set-LabVmPolicy {
+    $vms = @(Get-VM -Name 'MSLab-*')
+    foreach ($vm in $vms) {
+        if ($vm.State -eq 'Saved') { Remove-VMSavedState -VM $vm }
+        elseif ($vm.State -ne 'Off') { Stop-VM -VM $vm -Force }
+        $delay = if ($vm.Name -eq 'MSLab-DC') { 0 } else { 120 }
+        Set-VM -VM $vm -AutomaticStopAction ShutDown -AutomaticStartAction Start -AutomaticStartDelay $delay
+    }
+    $vms | Sort-Object { $_.Name -ne 'MSLab-DC' }, Name | Start-VM
+    Set-Status 'VM policy set: shut down on host stop, auto-start with host (DC first)'
+}
+
 function New-LabConfigContent {
     $pw = $AdminPassword.Replace("'", "''")
     @"
@@ -179,6 +192,7 @@ try {
         throw "MSLab-DC VM not found after Deploy. Check transcripts in $labRoot."
     }
     Set-NodeStorageIp
+    Set-LabVmPolicy
 
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     Set-Status "COMPLETE VMs: $((Get-VM -Name 'MSLab-*').Name -join ', ')"
