@@ -6,6 +6,8 @@
     ./deploy.ps1 -WhatIf
 .EXAMPLE
     ./deploy.ps1 -WithMSLab    # full rebuild: hosts + MSLab DC and nodes
+.EXAMPLE
+    ./deploy.ps1 -BastionSku Developer    # subscriptions that block public IPs (portal-only Bastion)
 #>
 [CmdletBinding()]
 param(
@@ -13,6 +15,9 @@ param(
     [string]$ResourceGroupName = 'rg-hyperv-training-eus2',
     [string]$Location = 'eastus2',
     [securestring]$AdminPassword,
+    [string]$VmSize,
+    [ValidateSet('Standard', 'Developer')]
+    [string]$BastionSku = 'Standard',
     [switch]$WithMSLab,
     [ValidateRange(0, 6)]
     [int]$NodeCount = 3,
@@ -63,7 +68,8 @@ if ($SubscriptionId) { Set-AzContext -Subscription $SubscriptionId | Out-Null }
 Write-Host "Subscription: $((Get-AzContext).Subscription.Name)" -ForegroundColor Cyan
 
 $fileParams = (Get-Content $parameterFile -Raw | ConvertFrom-Json).parameters
-Assert-VmCapacity -Location $Location -VmSize $fileParams.vmSize.value -HostCount $fileParams.hostCount.value
+if (-not $VmSize) { $VmSize = $fileParams.vmSize.value }
+Assert-VmCapacity -Location $Location -VmSize $VmSize -HostCount $fileParams.hostCount.value
 
 if (-not $AdminPassword) {
     $AdminPassword = Read-Host -AsSecureString -Prompt "Admin password for $($fileParams.adminUsername.value) (min 12 chars)"
@@ -82,6 +88,8 @@ $deployment = @{
     location              = $Location
     adminPassword         = $AdminPassword
     hostSetupScript       = Get-Content $setupScriptFile -Raw
+    bastionSku            = $BastionSku
+    vmSize                = $VmSize
 }
 
 if ($WhatIf) {
@@ -108,6 +116,9 @@ if ($WithMSLab) {
         -VMName ($hosts | ForEach-Object { $_.name }) -NodeCount $NodeCount -NodeMemoryGB $NodeMemoryGB
 }
 
-Write-Host "`nConnect: Azure portal > VM > Connect > Bastion (Developer SKU, free, one session at a time)."
+Write-Host "`nConnect: Azure portal > VM > Connect > Bastion."
+if ($BastionSku -eq 'Standard') {
+    Write-Host "Students without Azure accounts: ./bastion-links.ps1 -ResourceGroupName $ResourceGroupName  (browser RDP links; revoke with -Remove)" -ForegroundColor Cyan
+}
 Write-Host "`nVerify on each host: Get-Content C:\HyperVSetup\status.txt  (expect COMPLETE)"
 Write-Host "Cost: ~`$0.87/hour for both hosts while running; 1 TB Premium disks bill even when stopped. Run teardown.ps1 when done." -ForegroundColor Yellow

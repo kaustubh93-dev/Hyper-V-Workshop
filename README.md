@@ -20,6 +20,8 @@ Connect-AzAccount
 ./scripts/deploy.ps1 -SubscriptionId <sub-id> -ResourceGroupName rg-hyperv-training-eus2 -Location eastus2
 # Preview only
 ./scripts/deploy.ps1 -WhatIf
+# Subscription that blocks public IPs: portal-only Bastion Developer
+./scripts/deploy.ps1 -WithMSLab -BastionSku Developer
 ```
 
 `deploy.ps1` checks vCPU quota for the chosen VM size before deploying. Edit [template/parameters.json](template/parameters.json) to change host count, VM size, shutdown time, etc.
@@ -30,8 +32,8 @@ Connect-AzAccount
 |---|---|
 | Hyper-V hosts | `HYD-HOST-1..N` (default 2), `Standard_E4s_v5`, Windows Server 2025 Datacenter Gen2, Trusted Launch |
 | Data disk | 1 TB Premium SSD per host, formatted as `V:` (VMs in `V:\VMs`, MSLab in `V:\MSLab`, ISO in `V:\ISO\Server2025`) |
-| Network | VNet `172.16.0.0/16`, NSG allowing RDP only from Azure Bastion, no public IPs |
-| Azure Bastion | Developer SKU (free, one session at a time) |
+| Network | VNet `172.16.0.0/16`, NSG allowing RDP only from Azure Bastion, no public IPs on the hosts |
+| Azure Bastion | `bastionSku` = **Standard** (default: shareable links, needs one public IP on Bastion, ~$0.19/h) or **Developer** (free, portal-only, no public IP) |
 | Auto-shutdown | Daily at 21:00 India Standard Time |
 | Host setup | Run Command executes [scripts/setup-host.ps1](scripts/setup-host.ps1): installs Hyper-V, reboots, creates `InternalNAT` internal switch + NAT (`192.168.0.0/24`, gateway `.1`) and a DHCP scope (`.100-.199`) |
 | MSLab (`-WithMSLab`) | [scripts/mslab-host.ps1](scripts/mslab-host.ps1) on each host: MSLab v26.07.1, Server 2025 eval ISO, parent disks, `MSLab-DC` (`corp.contoso.com`) and `MSLab-Node1..3` (5 GB, 2 vCPU, 4x100 GB disks, `Storage1`/`Storage2` networks) |
@@ -74,9 +76,21 @@ Logs: `C:\MSLabSetup\status.txt`, `C:\MSLabSetup\mslab-host.log`, `V:\MSLab\*.lo
 
 ### Student access
 
-1. Azure portal > `HYD-HOST-1` (or `-2`) > **Connect > Bastion**, sign in as `labadmin`.
-2. Open **Hyper-V Manager** and connect to `MSLab-DC` (or a node) with `CORP\LabAdmin` / `LS1setup!`.
-3. Manage nodes from the DC (Server Manager, Failover Cluster Manager, PowerShell remoting). Guest computer names drop the `MSLab-` prefix, e.g. `Enter-PSSession Node1`.
+**Students without Azure accounts (Bastion Standard).** Create one browser RDP link per host and send it to the students:
+
+```powershell
+./scripts/bastion-links.ps1 -ResourceGroupName rg-hyperv-training-eus2           # create / list links
+./scripts/bastion-links.ps1 -ResourceGroupName rg-hyperv-training-eus2 -Remove   # revoke after class
+```
+
+Students open the link in any browser and sign in with the host account (`labadmin`). Links contain no credentials, the hosts keep no public IP or open port, and you can revoke links at any time (set an expiry in the portal under **Bastion > Shareable links**).
+
+**Users with Azure access (either SKU).** Azure portal > `HYD-HOST-1` (or `-2`) > **Connect > Bastion**, sign in as `labadmin`.
+
+Then, on the host:
+
+1. Open **Hyper-V Manager** and connect to `MSLab-DC` (or a node) with `CORP\LabAdmin` / `LS1setup!`.
+2. Manage nodes from the DC (Server Manager, Failover Cluster Manager, PowerShell remoting). Guest computer names drop the `MSLab-` prefix, e.g. `Enter-PSSession Node1`.
 
 To add more guests, edit `V:\MSLab\LabConfig.ps1` on the host and run `V:\MSLab\Deploy.ps1` again; existing VMs are kept.
 
@@ -92,7 +106,7 @@ Logs are in `C:\HyperVSetup`. Nested guests on `InternalNAT` get DHCP addresses 
 
 ### Bastion says "target machine is unreachable"
 
-Defender for Cloud JIT on some subscriptions removes the NSG rule that lets Bastion Developer (`168.63.129.16`) reach RDP. Re-add it:
+Defender for Cloud JIT on some subscriptions removes the NSG rules that let Bastion reach RDP (`168.63.129.16` for Developer, `AzureBastionSubnet` for Standard). Re-add them:
 
 ```powershell
 ./scripts/fix-bastion-nsg.ps1 -ResourceGroupName rg-hyperv-training-eus2

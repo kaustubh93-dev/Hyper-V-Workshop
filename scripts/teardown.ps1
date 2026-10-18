@@ -3,8 +3,13 @@
 .SYNOPSIS
     Stops or removes the Hyper-V training lab.
 .DESCRIPTION
-    Default deletes the whole resource group (stops all charges).
+    Default deletes the whole resource group and everything in it (hosts, disks, Bastion, public IP,
+    VNet, NSG, shutdown schedules) and verifies nothing is left, which stops all charges.
     -StopOnly deallocates the hosts; managed disks keep billing.
+.EXAMPLE
+    ./teardown.ps1            # delete everything (asks you to type the resource group name)
+.EXAMPLE
+    ./teardown.ps1 -StopOnly  # deallocate hosts only; bring back with start-lab.ps1
 #>
 [CmdletBinding()]
 param(
@@ -35,14 +40,28 @@ if ($StopOnly) {
     return
 }
 
+$resources = @(Get-AzResource -ResourceGroupName $ResourceGroupName | Sort-Object ResourceType, Name)
+Write-Host "`n$($resources.Count) resource(s) in ${ResourceGroupName}:" -ForegroundColor Cyan
+$resources | Format-Table Name, ResourceType -AutoSize | Out-String -Width 200 | Write-Host
+
+$locks = @(Get-AzResourceLock -ResourceGroupName $ResourceGroupName)
+if ($locks) {
+    throw "Resource locks block deletion: $($locks.Name -join ', '). Remove them with Remove-AzResourceLock, then re-run."
+}
+
 if (-not $Force) {
-    $answer = Read-Host "Type '$ResourceGroupName' to permanently delete it and all lab VMs/disks"
+    $answer = Read-Host "Type '$ResourceGroupName' to permanently delete it and ALL resources listed above"
     if ($answer -cne $ResourceGroupName) {
         Write-Host 'Confirmation did not match; aborting.'
         return
     }
 }
 
-Write-Host "Deleting $ResourceGroupName (this takes several minutes)..."
+Write-Host "Deleting $ResourceGroupName (usually 5-15 minutes)..."
+$started = Get-Date
 Remove-AzResourceGroup -Name $ResourceGroupName -Force | Out-Null
-Write-Host 'Lab removed.' -ForegroundColor Green
+
+if (Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue) {
+    throw "$ResourceGroupName still exists. Check the Azure portal for resources that failed to delete."
+}
+Write-Host ("Deleted {0} and all {1} resource(s) in {2:N0} min. Nothing is left billing." -f $ResourceGroupName, $resources.Count, ((Get-Date) - $started).TotalMinutes) -ForegroundColor Green

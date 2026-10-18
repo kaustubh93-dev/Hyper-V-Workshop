@@ -27,7 +27,9 @@
                 "Standard_D4s_v5",
                 "Standard_D8s_v5",
                 "Standard_E4s_v5",
-                "Standard_E8s_v5"
+                "Standard_E8s_v5",
+                "Standard_D8s_v4",
+                "Standard_E4s_v4"
             ],
             "metadata": {
                 "description": "Sizes that support nested virtualization."
@@ -88,6 +90,24 @@
             "type": "string",
             "defaultValue": "172.16.0.0/24"
         },
+        "bastionSku": {
+            "type": "string",
+            "defaultValue": "Standard",
+            "allowedValues": [
+                "Developer",
+                "Standard"
+            ],
+            "metadata": {
+                "description": "Standard enables shareable links (browser RDP without Azure accounts) but needs a public IP. Developer needs no public IP but is portal-only."
+            }
+        },
+        "bastionSubnetPrefix": {
+            "type": "string",
+            "defaultValue": "172.16.1.0/26",
+            "metadata": {
+                "description": "AzureBastionSubnet (min /26), used only with the Standard SKU."
+            }
+        },
         "autoShutdownTime": {
             "type": "string",
             "defaultValue": "21:00"
@@ -124,7 +144,47 @@
     },
     "variables": {
         "nsgName": "[format('{0}-nsg', parameters('namePrefix'))]",
-        "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), parameters('subnetName'))]"
+        "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), parameters('subnetName'))]",
+        "bastionName": "[format('{0}-bastion', parameters('vnetName'))]",
+        "bastionPipName": "[format('{0}-bastion-pip', parameters('vnetName'))]",
+        "isBastionStandard": "[equals(parameters('bastionSku'), 'Standard')]",
+        "hostSubnet": {
+            "name": "[parameters('subnetName')]",
+            "properties": {
+                "addressPrefix": "[parameters('subnetPrefix')]",
+                "defaultOutboundAccess": true,
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+                }
+            }
+        },
+        "bastionSubnet": {
+            "name": "AzureBastionSubnet",
+            "properties": {
+                "addressPrefix": "[parameters('bastionSubnetPrefix')]"
+            }
+        },
+        "bastionStandardProperties": {
+            "enableShareableLink": true,
+            "ipConfigurations": [
+                {
+                    "name": "ipconfig1",
+                    "properties": {
+                        "subnet": {
+                            "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('vnetName'), 'AzureBastionSubnet')]"
+                        },
+                        "publicIPAddress": {
+                            "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]"
+                        }
+                    }
+                }
+            ]
+        },
+        "bastionDeveloperProperties": {
+            "virtualNetwork": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+            }
+        }
     },
     "resources": [
         {
@@ -143,6 +203,19 @@
                             "access": "Allow",
                             "direction": "Inbound",
                             "sourceAddressPrefix": "168.63.129.16",
+                            "sourcePortRange": "*",
+                            "destinationAddressPrefix": "*",
+                            "destinationPortRange": "3389"
+                        }
+                    },
+                    {
+                        "name": "Allow-RDP-From-Bastion-Subnet",
+                        "properties": {
+                            "priority": 310,
+                            "protocol": "Tcp",
+                            "access": "Allow",
+                            "direction": "Inbound",
+                            "sourceAddressPrefix": "[parameters('bastionSubnetPrefix')]",
                             "sourcePortRange": "*",
                             "destinationAddressPrefix": "*",
                             "destinationPortRange": "3389"
@@ -166,37 +239,37 @@
                         "[parameters('vnetAddressPrefix')]"
                     ]
                 },
-                "subnets": [
-                    {
-                        "name": "[parameters('subnetName')]",
-                        "properties": {
-                            "addressPrefix": "[parameters('subnetPrefix')]",
-                            "defaultOutboundAccess": true,
-                            "networkSecurityGroup": {
-                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-                            }
-                        }
-                    }
-                ]
+                "subnets": "[if(variables('isBastionStandard'), createArray(variables('hostSubnet'), variables('bastionSubnet')), createArray(variables('hostSubnet')))]"
+            }
+        },
+        {
+            "condition": "[variables('isBastionStandard')]",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "apiVersion": "2024-05-01",
+            "name": "[variables('bastionPipName')]",
+            "location": "[parameters('location')]",
+            "tags": "[parameters('tags')]",
+            "sku": {
+                "name": "Standard"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "Static"
             }
         },
         {
             "type": "Microsoft.Network/bastionHosts",
             "apiVersion": "2024-05-01",
-            "name": "[format('{0}-bastion', parameters('vnetName'))]",
+            "name": "[variables('bastionName')]",
             "location": "[parameters('location')]",
             "tags": "[parameters('tags')]",
             "dependsOn": [
-                "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+                "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]",
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]"
             ],
             "sku": {
-                "name": "Developer"
+                "name": "[parameters('bastionSku')]"
             },
-            "properties": {
-                "virtualNetwork": {
-                    "id": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
-                }
-            }
+            "properties": "[if(variables('isBastionStandard'), variables('bastionStandardProperties'), variables('bastionDeveloperProperties'))]"
         },
         {
             "type": "Microsoft.Network/networkInterfaces",

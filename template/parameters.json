@@ -41,6 +41,9 @@
         "subnetPrefix": {
             "value": "172.16.0.0/24"
         },
+        "bastionSubnetPrefix": {
+            "value": "172.16.1.0/26"
+        },
         "autoShutdownTime": {
             "value": "21:00"
         },
