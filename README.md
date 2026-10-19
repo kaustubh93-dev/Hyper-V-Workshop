@@ -6,7 +6,14 @@ On-demand Hyper-V training lab: Windows Server 2025 Azure VMs with nested virtua
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fkaustubh93-dev%2FHyper-V-Workshop%2Fmain%2Ftemplate%2Ftemplate.json)
 
-The portal prompts for a resource group, region, and admin password (min 12 chars). Everything else has defaults.
+The portal prompts for a resource group, region, and admin password (min 12 chars). Everything else has defaults, and the template does the full build on its own:
+
+1. Deploys the hosts, network, Bastion and auto-shutdown (~15-20 min until the portal shows **Succeeded**).
+2. Installs Hyper-V and the `InternalNAT` network on each host (run command `setup-hyperv`).
+3. Queues the MSLab build on each host (run command `setup-mslab`, `deployMSLab` = true): DC plus `mslabNodeCount` nodes. This keeps running **~1.5 h after the portal shows Succeeded**; check `C:\MSLabSetup\status.txt` on a host for `COMPLETE`.
+4. With `bastionSku` = Standard: portal > Bastion > **Shareable links** > **Add**, then send the links to students.
+
+The subscription must allow public IPs for Bastion Standard. On Microsoft MCAPS subscriptions, enable it once with `Register-AzProviderFeature -ProviderNamespace Microsoft.Network -FeatureName AllowBringYourOwnPublicIpAddress`, then `Register-AzResourceProvider -ProviderNamespace Microsoft.Network`. Otherwise set `bastionSku` = Developer.
 
 ### Or deploy with PowerShell
 
@@ -30,13 +37,13 @@ Connect-AzAccount
 
 | Resource | Details |
 |---|---|
-| Hyper-V hosts | `HYD-HOST-1..N` (default 2), `Standard_E4s_v5`, Windows Server 2025 Datacenter Gen2, Trusted Launch |
+| Hyper-V hosts | `HYD-HOST-1..N` (default 2), `Standard_E4s_v4` (4 vCPU / 32 GB; E4s_v5, E8s_v5, D8s_v5/v4 also allowed), Windows Server 2025 Datacenter Gen2, Trusted Launch |
 | Data disk | 1 TB Premium SSD per host, formatted as `V:` (VMs in `V:\VMs`, MSLab in `V:\MSLab`, ISO in `V:\ISO\Server2025`) |
 | Network | VNet `172.16.0.0/16`, NSG allowing RDP only from Azure Bastion, no public IPs on the hosts |
 | Azure Bastion | `bastionSku` = **Standard** (default: shareable links, needs one public IP on Bastion, ~$0.19/h) or **Developer** (free, portal-only, no public IP) |
 | Auto-shutdown | Daily at 21:00 India Standard Time |
 | Host setup | Run Command executes [scripts/setup-host.ps1](scripts/setup-host.ps1): installs Hyper-V, reboots, creates `InternalNAT` internal switch + NAT (`192.168.0.0/24`, gateway `.1`) and a DHCP scope (`.100-.199`) |
-| MSLab (`-WithMSLab`) | [scripts/mslab-host.ps1](scripts/mslab-host.ps1) on each host: MSLab v26.07.1, Server 2025 eval ISO, parent disks, `MSLab-DC` (`corp.contoso.com`) and `MSLab-Node1..3` (5 GB, 2 vCPU, 4x100 GB disks, `Storage1`/`Storage2` networks) |
+| MSLab (`deployMSLab` / `-WithMSLab`) | Run Command executes [scripts/mslab-host.ps1](scripts/mslab-host.ps1) on each host: MSLab v26.07.1, Server 2025 eval ISO, parent disks, `MSLab-DC` (`corp.contoso.com`) and `MSLab-Node1..3` (5 GB, 2 vCPU, 4x100 GB disks, `Storage1`/`Storage2` networks) |
 
 ## MSLab: domain controller and guest VMs
 

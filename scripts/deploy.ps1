@@ -90,6 +90,10 @@ $deployment = @{
     hostSetupScript       = Get-Content $setupScriptFile -Raw
     bastionSku            = $BastionSku
     vmSize                = $VmSize
+    deployMSLab           = [bool]$WithMSLab
+    mslabNodeCount        = $NodeCount
+    mslabNodeMemoryGB     = $NodeMemoryGB
+    mslabSetupScript      = Get-Content (Join-Path $PSScriptRoot 'mslab-host.ps1') -Raw
 }
 
 if ($WhatIf) {
@@ -112,8 +116,7 @@ foreach ($labHost in $hosts) {
 & (Join-Path $PSScriptRoot 'fix-bastion-nsg.ps1') -ResourceGroupName $ResourceGroupName -NsgName "$($fileParams.namePrefix.value)-nsg"
 
 if ($WithMSLab) {
-    & (Join-Path $PSScriptRoot 'deploy-mslab.ps1') -ResourceGroupName $ResourceGroupName `
-        -VMName ($hosts | ForEach-Object { $_.name }) -NodeCount $NodeCount -NodeMemoryGB $NodeMemoryGB
+    Write-Host "`nMSLab is building in the background on each host (~1.5 h). Check: ./deploy-mslab.ps1 -ResourceGroupName $ResourceGroupName -Status" -ForegroundColor Cyan
 }
 
 Write-Host "`nConnect: Azure portal > VM > Connect > Bastion."

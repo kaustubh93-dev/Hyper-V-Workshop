@@ -4,10 +4,10 @@
     Hydrates and deploys an MSLab environment (DC, Server 2025 parent disks, nodes) on a lab Hyper-V host.
 .DESCRIPTION
     Without -Run (e.g. via Azure Run Command) it stages itself to C:\MSLabSetup and starts a SYSTEM
-    scheduled task, then returns. The task downloads MSLab and the Server 2025 evaluation ISO, writes
-    LabConfig.ps1 and runs 1_Prereq, 2_CreateParentDisks and Deploy unattended.
+    scheduled task, then returns. The task (also triggered at startup, so it survives the Hyper-V reboot)
+    waits for the 'InternalNAT' switch from setup-host.ps1, downloads MSLab and the Server 2025 evaluation
+    ISO, writes LabConfig.ps1 and runs 1_Prereq, 2_CreateParentDisks and Deploy unattended.
     Progress: C:\MSLabSetup\status.txt and C:\MSLabSetup\mslab-host.log.
-    Requires setup-host.ps1 to have created the 'InternalNAT' switch (192.168.0.0/24), which MSLab reuses on Azure.
 #>
 [CmdletBinding()]
 param(
@@ -129,9 +129,6 @@ for (`$i = 1; `$i -le $NodeCount; `$i++) {
 
 if (-not $Run) {
     if (-not $PSCommandPath) { throw 'Run this script from a file so it can stage itself.' }
-    if (-not (Get-VMSwitch -Name 'InternalNAT' -ErrorAction SilentlyContinue)) {
-        throw "Switch 'InternalNAT' not found. Re-run setup-host.ps1 first."
-    }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
     Copy-Item -LiteralPath $PSCommandPath -Destination "$stage\mslab-host.ps1" -Force
     @{ IsoUrl = $IsoUrl; NodeCount = $NodeCount; NodeMemoryGB = $NodeMemoryGB; AdminPassword = $AdminPassword } |
@@ -139,8 +136,9 @@ if (-not $Run) {
 
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
         -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$stage\mslab-host.ps1`" -Run"
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero)
-    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
     Set-Status 'QUEUED MSLab setup task started'
     return
@@ -154,6 +152,15 @@ $AdminPassword = $params.AdminPassword
 
 Start-Transcript -Path (Join-Path $stage 'mslab-host.log') -Append | Out-Null
 try {
+    # When queued by the ARM template, Hyper-V is still installing/rebooting and setup-host.ps1 hasn't created the switch yet
+    $deadline = (Get-Date).AddMinutes(60)
+    $waiting = $false
+    while (-not (Get-Command Get-VMSwitch -ErrorAction SilentlyContinue) -or -not (Get-VMSwitch -Name 'InternalNAT' -ErrorAction SilentlyContinue)) {
+        if ((Get-Date) -gt $deadline) { throw "Switch 'InternalNAT' not found after 60 min. Check C:\HyperVSetup\status.txt." }
+        if (-not $waiting) { Set-Status 'WAITING for Hyper-V and InternalNAT switch (setup-host.ps1)'; $waiting = $true }
+        Start-Sleep -Seconds 60
+    }
+
     # AutoCleanUp in 2_CreateParentDisks renames 3_Deploy.ps1 to Deploy.ps1
     if (-not (Test-Path "$labRoot\3_Deploy.ps1") -and -not (Test-Path "$labRoot\Deploy.ps1")) {
         Set-Status 'DOWNLOADING MSLab'

@@ -22,7 +22,7 @@
         },
         "vmSize": {
             "type": "string",
-            "defaultValue": "Standard_E4s_v5",
+            "defaultValue": "Standard_E4s_v4",
             "allowedValues": [
                 "Standard_D4s_v5",
                 "Standard_D8s_v5",
@@ -134,6 +134,36 @@
         "nestedNatPrefix": {
             "type": "string",
             "defaultValue": "192.168.0.0/24"
+        },
+        "deployMSLab": {
+            "type": "bool",
+            "defaultValue": true,
+            "metadata": {
+                "description": "Build MSLab on each host after Hyper-V setup: DC (corp.contoso.com) plus Server 2025 nodes. Runs in the background for ~1.5 h after the deployment finishes."
+            }
+        },
+        "mslabNodeCount": {
+            "type": "int",
+            "defaultValue": 3,
+            "minValue": 0,
+            "maxValue": 6
+        },
+        "mslabNodeMemoryGB": {
+            "type": "int",
+            "defaultValue": 5,
+            "minValue": 2,
+            "maxValue": 16
+        },
+        "mslabSetupScript": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Contents of scripts/mslab-host.ps1, supplied by deploy.ps1. Empty uses mslabSetupScriptUri."
+            }
+        },
+        "mslabSetupScriptUri": {
+            "type": "string",
+            "defaultValue": "https://raw.githubusercontent.com/kaustubh93-dev/Hyper-V-Workshop/main/scripts/mslab-host.ps1"
         },
         "tags": {
             "type": "object",
@@ -440,6 +470,37 @@
                 "timeoutInSeconds": 3600,
                 "treatFailureAsDeploymentFailure": true
             }
+        },
+        {
+            "condition": "[parameters('deployMSLab')]",
+            "type": "Microsoft.Compute/virtualMachines/runCommands",
+            "apiVersion": "2024-07-01",
+            "name": "[format('{0}-{1}/setup-mslab', parameters('namePrefix'), copyIndex(1))]",
+            "location": "[parameters('location')]",
+            "tags": "[parameters('tags')]",
+            "copy": {
+                "name": "mslabLoop",
+                "count": "[parameters('hostCount')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines/runCommands', format('{0}-{1}', parameters('namePrefix'), copyIndex(1)), 'setup-hyperv')]"
+            ],
+            "properties": {
+                "source": "[if(empty(parameters('mslabSetupScript')), createObject('scriptUri', parameters('mslabSetupScriptUri')), createObject('script', parameters('mslabSetupScript')))]",
+                "parameters": [
+                    {
+                        "name": "NodeCount",
+                        "value": "[string(parameters('mslabNodeCount'))]"
+                    },
+                    {
+                        "name": "NodeMemoryGB",
+                        "value": "[string(parameters('mslabNodeMemoryGB'))]"
+                    }
+                ],
+                "asyncExecution": true,
+                "timeoutInSeconds": 600,
+                "treatFailureAsDeploymentFailure": false
+            }
         }
     ],
     "outputs": {
@@ -452,6 +513,10 @@
                     "privateIp": "[reference(resourceId('Microsoft.Network/networkInterfaces', format('{0}-{1}-nic', parameters('namePrefix'), copyIndex(1))), '2023-09-01').ipConfigurations[0].properties.privateIPAddress]"
                 }
             }
+        },
+        "nextSteps": {
+            "type": "string",
+            "value": "[concat(if(parameters('deployMSLab'), 'MSLab builds in the background (~1.5 h); progress in C:\\MSLabSetup\\status.txt on each host. ', ''), if(variables('isBastionStandard'), format('Student browser access: portal > {0} > Shareable links > Add, or run scripts/bastion-links.ps1.', variables('bastionName')), 'Connect: portal > VM > Connect > Bastion.'))]"
         }
     }
 }
