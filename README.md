@@ -75,8 +75,8 @@ The storage VLANs have no DHCP server, so after Deploy the script renames each n
 Hydration runs as a background task on each host (~1.5 h). Start it after deploy, or rerun it to resume if interrupted:
 
 ```powershell
-./scripts/deploy-mslab.ps1 -ResourceGroupName rg-hyperv-training-eus2           # start / resume
-./scripts/deploy-mslab.ps1 -ResourceGroupName rg-hyperv-training-eus2 -Status   # expect COMPLETE VMs: MSLab-DC, MSLab-Node1..3
+./scripts/deploy-mslab.ps1           # start / resume
+./scripts/deploy-mslab.ps1 -Status   # expect COMPLETE VMs: MSLab-DC, MSLab-Node1..3
 ```
 
 Logs: `C:\MSLabSetup\status.txt`, `C:\MSLabSetup\mslab-host.log`, `V:\MSLab\*.log`. Start before ~19:00 IST so the 21:00 auto-shutdown doesn't interrupt hydration. Change node count or memory with `-NodeCount` (0-6) and `-NodeMemoryGB` (2-16).
@@ -86,8 +86,8 @@ Logs: `C:\MSLabSetup\status.txt`, `C:\MSLabSetup\mslab-host.log`, `V:\MSLab\*.lo
 **Students without Azure accounts (Bastion Standard).** Create one browser RDP link per host and send it to the students:
 
 ```powershell
-./scripts/bastion-links.ps1 -ResourceGroupName rg-hyperv-training-eus2           # create / list links
-./scripts/bastion-links.ps1 -ResourceGroupName rg-hyperv-training-eus2 -Remove   # revoke after class
+./scripts/bastion-links.ps1           # create / list links
+./scripts/bastion-links.ps1 -Remove   # revoke after class
 ```
 
 Students open the link in any browser and sign in with the host account (`labadmin`). Links contain no credentials, the hosts keep no public IP or open port, and you can revoke links at any time (set an expiry in the portal under **Bastion > Shareable links**).
@@ -116,7 +116,7 @@ Logs are in `C:\HyperVSetup`. Nested guests on `InternalNAT` get DHCP addresses 
 Defender for Cloud JIT on some subscriptions removes the NSG rules that let Bastion reach RDP (`168.63.129.16` for Developer, `AzureBastionSubnet` for Standard). Re-add them:
 
 ```powershell
-./scripts/fix-bastion-nsg.ps1 -ResourceGroupName rg-hyperv-training-eus2
+./scripts/fix-bastion-nsg.ps1
 ```
 
 ## Cost and cleanup
@@ -124,9 +124,11 @@ Defender for Cloud JIT on some subscriptions removes the NSG rules that let Bast
 Roughly $0.87/hour for two hosts while running. The 1 TB Premium disks bill even when the VMs are stopped.
 
 ```powershell
-./scripts/start-lab.ps1                                   # start hosts + MSLab VMs (use this instead of the portal Start button)
-./scripts/teardown.ps1 -ResourceGroupName <rg> -StopOnly  # deallocate hosts only
-./scripts/teardown.ps1 -ResourceGroupName <rg>            # delete everything
+./scripts/start-lab.ps1           # start hosts + MSLab VMs (use this instead of the portal Start button)
+./scripts/teardown.ps1 -StopOnly  # deallocate hosts only
+./scripts/teardown.ps1            # delete everything (asks you to type the resource group name)
 ```
+
+Scripts find the lab resource group automatically (the one holding the `HYD-HOST-*` VMs); pass `-ResourceGroupName` to override.
 
 `start-lab.ps1` handles Azure capacity shortages: if `Standard_E4s_v5` isn't available in the zone, it resizes the stopped host to the next nested-virtualization size (`E4s_v4`, `D8s_v5`, `D8s_v4`, `E8s_v5`) and retries. Lab VMs are set to shut down (not save state) with the host and auto-start with it, DC first, so they boot cleanly even on a different CPU after a resize.

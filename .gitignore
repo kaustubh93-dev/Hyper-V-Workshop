@@ -1,0 +1,13 @@
+# Admin scripts kept on the operator's machine only. The portal "Deploy to Azure" flow needs just
+# template/template.json, scripts/setup-host.ps1 and scripts/mslab-host.ps1 from this repo.
+template/parameters.json
+scripts/deploy.ps1
+scripts/deploy-mslab.ps1
+scripts/start-lab.ps1
+scripts/teardown.ps1
+scripts/bastion-links.ps1
+scripts/fix-bastion-nsg.ps1
+scripts/lab-common.ps1
+
+*.log
+*.partial
