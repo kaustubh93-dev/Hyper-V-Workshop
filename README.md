@@ -17,7 +17,8 @@ The portal prompts for a resource group, region, and admin password (min 12 char
 
 Deploy before ~19:00 IST so the 21:00 auto-shutdown doesn't interrupt the MSLab build.
 
-**Bastion defaults to Developer** so deployments don't require public-IP subscription registration. Developer is portal-only and requires users to sign in to Azure. For browser shareable links, choose Standard; on some subscriptions Standard requires this one-time registration (Azure Cloud Shell or Az PowerShell):
+> [!IMPORTANT]
+> **Browser shareable links require Bastion Standard.** Standard needs a public IP; on some subscriptions, first register this feature and re-register the provider from Azure Cloud Shell or Az PowerShell. **Bastion Developer is the default** and avoids the public-IP prerequisite, but is portal-only and requires users to sign in to Azure.
 
 ```powershell
 Register-AzProviderFeature -ProviderNamespace Microsoft.Network -FeatureName AllowBringYourOwnPublicIpAddress
