@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (git-ignored) and adjust. Pass the password via TF_VAR_admin_password instead of this file.
+subscription_id     = "00000000-0000-0000-0000-000000000000"
+resource_group_name = "HYPER-V-WORKSHOP-RG"
+location            = "eastus2"
+zone                = "2" # verify zone and SKU with scripts/check-host-capacity.ps1
+host_count          = 2
+vm_size             = "Standard_D8as_v5"
+bastion_sku         = "Developer"
+deploy_mslab        = true

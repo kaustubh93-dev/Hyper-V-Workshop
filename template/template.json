@@ -10,7 +10,7 @@
             "type": "int",
             "defaultValue": 2,
             "minValue": 1,
-            "maxValue": 4
+            "maxValue": 6
         },
         "namePrefix": {
             "type": "string",
@@ -22,17 +22,20 @@
         },
         "vmSize": {
             "type": "string",
-            "defaultValue": "Standard_E4s_v4",
+            "defaultValue": "Standard_D8as_v5",
             "allowedValues": [
                 "Standard_D4s_v5",
                 "Standard_D8s_v5",
                 "Standard_E4s_v5",
                 "Standard_E8s_v5",
                 "Standard_D8s_v4",
-                "Standard_E4s_v4"
+                "Standard_E4s_v4",
+                "Standard_D8as_v5",
+                "Standard_E8as_v5",
+                "Standard_E4as_v5"
             ],
             "metadata": {
-                "description": "Sizes that support nested virtualization."
+                "description": "Diskless sizes that support nested virtualization. Run scripts/check-host-capacity.ps1 before deployment; Azure capacity can change between check and allocation."
             }
         },
         "adminUsername": {
@@ -45,12 +48,15 @@
         },
         "zone": {
             "type": "string",
-            "defaultValue": "1",
+            "defaultValue": "2",
             "allowedValues": [
                 "1",
                 "2",
                 "3"
-            ]
+            ],
+            "metadata": {
+                "description": "In eastus2 this subscription is restricted (NotAvailableForSubscription) from zones 1 and 3 for the lab sizes."
+            }
         },
         "osDiskType": {
             "type": "string",
@@ -92,13 +98,13 @@
         },
         "bastionSku": {
             "type": "string",
-            "defaultValue": "Standard",
+            "defaultValue": "Developer",
             "allowedValues": [
                 "Developer",
                 "Standard"
             ],
             "metadata": {
-                "description": "Standard enables shareable links (browser RDP without Azure accounts) but needs a public IP. Developer needs no public IP but is portal-only."
+                "description": "Developer is the default and needs no public IP. Standard enables shareable links but requires the subscription public-IP feature to be registered."
             }
         },
         "bastionSubnetPrefix": {
@@ -294,7 +300,7 @@
             "tags": "[parameters('tags')]",
             "dependsOn": [
                 "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]",
-                "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]"
+                "[if(variables('isBastionStandard'), resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName')), resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')))]"
             ],
             "sku": {
                 "name": "[parameters('bastionSku')]"

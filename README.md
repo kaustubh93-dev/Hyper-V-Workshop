@@ -13,26 +13,27 @@ The portal prompts for a resource group, region, and admin password (min 12 char
 1. Deploys the hosts, network, Bastion and auto-shutdown (~15-20 min until the portal shows **Succeeded**).
 2. Installs Hyper-V and the `InternalNAT` network on each host (run command `setup-hyperv`).
 3. Queues the MSLab build on each host (run command `setup-mslab`): DC plus the configured number of nodes. This keeps running **~1.5 h after the portal shows Succeeded** (see [Check progress](#check-progress)).
-4. You then share the lab with students through Bastion shareable links (see [Share the lab with students](#share-the-lab-with-students)).
+4. Connect through Bastion. Standard supports shareable links; Developer is the no-public-IP default and requires users to have Azure access.
 
 Deploy before ~19:00 IST so the 21:00 auto-shutdown doesn't interrupt the MSLab build.
 
-**Bastion Standard needs a public IP.** On Microsoft MCAPS subscriptions this is blocked until you run the following once (Azure Cloud Shell or Az PowerShell):
+**Bastion defaults to Developer** so deployments don't require public-IP subscription registration. Developer is portal-only and requires users to sign in to Azure. For browser shareable links, choose Standard; on some subscriptions Standard requires this one-time registration (Azure Cloud Shell or Az PowerShell):
 
 ```powershell
 Register-AzProviderFeature -ProviderNamespace Microsoft.Network -FeatureName AllowBringYourOwnPublicIpAddress
 Register-AzResourceProvider -ProviderNamespace Microsoft.Network
 ```
 
-If you can't, set **Bastion Sku** = `Developer` (free, no public IP, but portal-only access for users with Azure accounts).
+If the feature isn't registered or permitted, keep **Bastion Sku** = `Developer`.
 
 ### Key parameters
 
 | Parameter | Default | Notes |
 |---|---|---|
-| Host Count | 2 | Hyper-V hosts `HYD-HOST-1..N` |
-| Vm Size | `Standard_E4s_v4` | On a capacity error, pick `Standard_E4s_v5`, `Standard_D8s_v5` or `Standard_D8s_v4`, or another zone |
-| Bastion Sku | `Standard` | `Developer` for subscriptions without public IPs |
+| Host Count | 2 | 1-6 Hyper-V hosts `HYD-HOST-1..N` |
+| Vm Size | `Standard_D8as_v5` | Nested-virtualization size currently preflight-approved in zone 2; rerun preflight before each deployment |
+| Zone | `2` | In this subscription, zones 1 and 3 have had SKU restrictions in eastus2 |
+| Bastion Sku | `Developer` | No public IP prerequisite; choose `Standard` for shareable links after its feature precheck passes |
 | Deploy MS Lab | `true` | `false` deploys bare Hyper-V hosts |
 | Mslab Node Count / Memory GB | 3 / 5 | Nodes per host |
 | Auto Shutdown Time / Time Zone | 21:00 / India Standard Time | |
@@ -41,13 +42,23 @@ If you can't, set **Bastion Sku** = `Developer` (free, no public IP, but portal-
 
 | Resource | Details |
 |---|---|
-| Hyper-V hosts | `HYD-HOST-1..N` (default 2), `Standard_E4s_v4` (4 vCPU / 32 GB), Windows Server 2025 Datacenter Gen2, Trusted Launch |
+| Hyper-V hosts | `HYD-HOST-1..N` (default 2, maximum 6), `Standard_D8as_v5` (8 vCPU / 32 GB), Windows Server 2025 Datacenter Gen2, Trusted Launch |
 | Data disk | 1 TB Premium SSD per host, formatted as `V:` (VMs in `V:\VMs`, MSLab in `V:\MSLab`, ISO in `V:\ISO\Server2025`) |
 | Network | VNet `172.16.0.0/16`, NSG allowing RDP only from Azure Bastion, no public IPs on the hosts |
-| Azure Bastion | **Standard** (default: shareable links, one public IP on Bastion, ~$0.19/h) or **Developer** (free, portal-only, no public IP) |
+| Azure Bastion | **Developer** (default, portal-only, no public IP prerequisite) or **Standard** (shareable links, public IP, additional cost and subscription prerequisites) |
 | Auto-shutdown | Daily at 21:00 India Standard Time |
 | Host setup | Run Command executes [scripts/setup-host.ps1](scripts/setup-host.ps1): installs Hyper-V, reboots, creates `InternalNAT` internal switch + NAT (`192.168.0.0/24`, gateway `.1`) and a DHCP scope (`.100-.199`) |
 | MSLab | Run Command executes [scripts/mslab-host.ps1](scripts/mslab-host.ps1) on each host: MSLab v26.07.1, Server 2025 eval ISO, parent disks, `MSLab-DC` (`corp.contoso.com`) and `MSLab-Node1..3` (5 GB, 2 vCPU, 4x100 GB disks, `Storage1`/`Storage2` networks) |
+
+## Capacity preflight
+
+Before ARM or Terraform deployment, check the selected SKU, zone restrictions, and how many additional hosts current family/core quota supports:
+
+```powershell
+.\scripts\check-host-capacity.ps1 -Location eastus2 -Zone 2 -VmSize Standard_D8as_v5 -HostCount 6 -BastionSku Developer
+```
+
+The check also verifies public-IP feature/provider prerequisites when `-BastionSku Standard` is selected. Quota and SKU restrictions are checkable; **live compute capacity is not reserved by this preflight and can change before Azure allocates VMs**. If the selected SKU is restricted, try another supported size or zone.
 
 ## MSLab: domain controller and guest VMs
 
@@ -90,7 +101,7 @@ More detail: `C:\MSLabSetup\mslab-host.log` and `V:\MSLab\*.log`. If the host re
 
 ## Share the lab with students
 
-Students need only a browser: no Azure account, VPN or RDP client.
+With **Bastion Standard**, students need only a browser, not an Azure account, VPN or RDP client. With **Bastion Developer**, users need an Azure account with access to the subscription and connect through the portal.
 
 1. Portal > resource group > **vnet-hyperv-training-bastion** > **Shareable links** > **+ Add**.
 2. Select `HYD-HOST-1` and/or `HYD-HOST-2`, optionally set an **Expiration**, then **Apply**.
@@ -106,13 +117,13 @@ Users with Azure access can also use portal > VM > **Connect > Bastion**.
 
 **Bastion says "target machine is unreachable".** Defender for Cloud JIT on some subscriptions removes the NSG rule that lets Bastion reach RDP. Portal > `HYD-HOST-nsg` > **Inbound security rules** > **+ Add**: source IP `172.16.1.0/26` (Bastion Standard) or `168.63.129.16` (Bastion Developer), destination port `3389`, TCP, Allow, priority `310`.
 
-**VM won't start: "requested VM size is currently not available".** Azure is out of capacity for that size in the zone. Portal > VM > **Size**: pick another size without a local temp disk (`Standard_E4s_v4`, `Standard_E4s_v5`, `Standard_D8s_v5`, `Standard_D8s_v4`), then **Start**. Lab VMs shut down cleanly with the host and auto-start with it (DC first), so they boot fine after a resize.
+**VM won't start: "requested VM size is currently not available".** Azure capacity can change after preflight. Run `scripts/start-lab.ps1` to try the configured diskless nested-virtualization sizes; if all fail, check another eligible zone or retry later. Lab VMs shut down cleanly with the host and auto-start with it (DC first), so they boot after a resize.
 
 **Nested networking.** Guests on `InternalNAT` get DHCP addresses in `192.168.0.100-199` (gateway `192.168.0.1`). Host setup logs are in `C:\HyperVSetup`.
 
 ## Cost and cleanup
 
-Roughly $0.87/hour for two hosts plus ~$0.19/hour for Bastion Standard while running. Stopping the hosts ends compute charges, but the 1 TB Premium disks and Bastion keep billing.
+Compute cost depends on host size/count and Bastion SKU. Deallocating hosts ends compute charges, but managed disks continue to bill. Standard Bastion has hourly charges; Developer is free.
 
 - **Pause:** portal > each VM > **Stop** (deallocate). **Start** them again before class.
 - **Remove everything:** portal > resource group > **Delete resource group**, then type its name to confirm. This deletes the hosts, disks, Bastion, public IP, network and schedules.

@@ -1,0 +1,283 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "firstHostIndex": {
+      "type": "int",
+      "defaultValue": 3,
+      "minValue": 3,
+      "maxValue": 9
+    },
+    "hostCount": {
+      "type": "int",
+      "defaultValue": 2,
+      "minValue": 1,
+      "maxValue": 2
+    },
+    "adminPassword": {
+      "type": "secureString",
+      "minLength": 12
+    },
+    "hostSetupScriptUri": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/kaustubh93-dev/Hyper-V-Workshop/main/scripts/setup-host.ps1"
+    },
+    "mslabSetupScriptUri": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/kaustubh93-dev/Hyper-V-Workshop/main/scripts/mslab-host.ps1"
+    },
+    "autoShutdownTime": {
+      "type": "string",
+      "defaultValue": "21:00"
+    },
+    "autoShutdownTimeZone": {
+      "type": "string",
+      "defaultValue": "India Standard Time"
+    },
+    "nestedNatPrefix": {
+      "type": "string",
+      "defaultValue": "192.168.0.0/24"
+    },
+    "mslabNodeCount": {
+      "type": "int",
+      "defaultValue": 3,
+      "minValue": 0,
+      "maxValue": 6
+    },
+    "mslabNodeMemoryGB": {
+      "type": "int",
+      "defaultValue": 5,
+      "minValue": 2,
+      "maxValue": 16
+    }
+  },
+  "variables": {
+    "location": "[resourceGroup().location]",
+    "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', 'vnet-hyperv-training', 'snet-hosts')]",
+    "tags": {
+      "purpose": "hyperv-training"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-09-01",
+      "name": "[format('HYD-HOST-{0}-nic', copyIndex('hostNic', parameters('firstHostIndex')))]",
+      "location": "[variables('location')]",
+      "tags": "[variables('tags')]",
+      "copy": {
+        "name": "hostNic",
+        "count": "[parameters('hostCount')]",
+        "mode": "Serial",
+        "batchSize": 1
+      },
+      "properties": {
+        "enableAcceleratedNetworking": true,
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "primary": true,
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('subnetId')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2024-07-01",
+      "name": "[format('HYD-HOST-{0}', copyIndex('hostVm', parameters('firstHostIndex')))]",
+      "location": "[variables('location')]",
+      "tags": "[variables('tags')]",
+      "copy": {
+        "name": "hostVm",
+        "count": "[parameters('hostCount')]",
+        "mode": "Serial",
+        "batchSize": 1
+      },
+      "zones": [
+        "2"
+      ],
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', format('HYD-HOST-{0}-nic', copyIndex('hostVm', parameters('firstHostIndex'))))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_E8as_v5"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2025-datacenter-g2",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[format('HYD-HOST-{0}-osdisk', copyIndex('hostVm', parameters('firstHostIndex')))]",
+            "createOption": "FromImage",
+            "deleteOption": "Detach",
+            "managedDisk": {
+              "storageAccountType": "Standard_LRS"
+            }
+          },
+          "dataDisks": [
+            {
+              "name": "[format('HYD-HOST-{0}-datadisk0', copyIndex('hostVm', parameters('firstHostIndex')))]",
+              "lun": 0,
+              "createOption": "Empty",
+              "diskSizeGB": 1024,
+              "caching": "ReadOnly",
+              "deleteOption": "Detach",
+              "managedDisk": {
+                "storageAccountType": "Standard_LRS"
+              }
+            }
+          ]
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', format('HYD-HOST-{0}-nic', copyIndex('hostVm', parameters('firstHostIndex'))))]",
+              "properties": {
+                "deleteOption": "Detach"
+              }
+            }
+          ]
+        },
+        "securityProfile": {
+          "securityType": "TrustedLaunch",
+          "uefiSettings": {
+            "secureBootEnabled": true,
+            "vTpmEnabled": true
+          }
+        },
+        "osProfile": {
+          "computerName": "[format('HYD-HOST-{0}', copyIndex('hostVm', parameters('firstHostIndex')))]",
+          "adminUsername": "labadmin",
+          "adminPassword": "[parameters('adminPassword')]",
+          "windowsConfiguration": {
+            "enableAutomaticUpdates": false,
+            "provisionVMAgent": true,
+            "patchSettings": {
+              "patchMode": "Manual",
+              "assessmentMode": "ImageDefault"
+            }
+          }
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DevTestLab/schedules",
+      "apiVersion": "2018-09-15",
+      "name": "[format('shutdown-computevm-HYD-HOST-{0}', copyIndex('shutdownHost', parameters('firstHostIndex')))]",
+      "location": "[variables('location')]",
+      "tags": "[variables('tags')]",
+      "copy": {
+        "name": "shutdownHost",
+        "count": "[parameters('hostCount')]",
+        "mode": "Serial",
+        "batchSize": 1
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', format('HYD-HOST-{0}', copyIndex('shutdownHost', parameters('firstHostIndex'))))]"
+      ],
+      "properties": {
+        "status": "Enabled",
+        "taskType": "ComputeVmShutdownTask",
+        "dailyRecurrence": {
+          "time": "[replace(parameters('autoShutdownTime'), ':', '')]"
+        },
+        "timeZoneId": "[parameters('autoShutdownTimeZone')]",
+        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', format('HYD-HOST-{0}', copyIndex('shutdownHost', parameters('firstHostIndex'))))]",
+        "notificationSettings": {
+          "status": "Disabled",
+          "notificationLocale": "en",
+          "timeInMinutes": 30,
+          "emailRecipient": ""
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/runCommands",
+      "apiVersion": "2024-07-01",
+      "name": "[format('HYD-HOST-{0}/setup-hyperv', copyIndex('setupHost', parameters('firstHostIndex')))]",
+      "location": "[variables('location')]",
+      "tags": "[variables('tags')]",
+      "copy": {
+        "name": "setupHost",
+        "count": "[parameters('hostCount')]",
+        "mode": "Serial",
+        "batchSize": 1
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', format('HYD-HOST-{0}', copyIndex('setupHost', parameters('firstHostIndex'))))]"
+      ],
+      "properties": {
+        "source": {
+          "scriptUri": "[parameters('hostSetupScriptUri')]"
+        },
+        "parameters": [
+          {
+            "name": "NatPrefix",
+            "value": "[parameters('nestedNatPrefix')]"
+          }
+        ],
+        "asyncExecution": false,
+        "timeoutInSeconds": 3600,
+        "treatFailureAsDeploymentFailure": true
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/runCommands",
+      "apiVersion": "2024-07-01",
+      "name": "[format('HYD-HOST-{0}/setup-mslab', copyIndex('mslabHost', parameters('firstHostIndex')))]",
+      "location": "[variables('location')]",
+      "tags": "[variables('tags')]",
+      "copy": {
+        "name": "mslabHost",
+        "count": "[parameters('hostCount')]",
+        "mode": "Serial",
+        "batchSize": 1
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines/runCommands', format('HYD-HOST-{0}', copyIndex('mslabHost', parameters('firstHostIndex'))), 'setup-hyperv')]"
+      ],
+      "properties": {
+        "source": {
+          "scriptUri": "[parameters('mslabSetupScriptUri')]"
+        },
+        "parameters": [
+          {
+            "name": "NodeCount",
+            "value": "[string(parameters('mslabNodeCount'))]"
+          },
+          {
+            "name": "NodeMemoryGB",
+            "value": "[string(parameters('mslabNodeMemoryGB'))]"
+          }
+        ],
+        "asyncExecution": true,
+        "timeoutInSeconds": 600,
+        "treatFailureAsDeploymentFailure": false
+      }
+    }
+  ],
+  "outputs": {
+    "newHosts": {
+      "type": "array",
+      "copy": {
+        "count": "[parameters('hostCount')]",
+        "input": "[format('HYD-HOST-{0}', add(parameters('firstHostIndex'), copyIndex()))]"
+      }
+    }
+  }
+}
