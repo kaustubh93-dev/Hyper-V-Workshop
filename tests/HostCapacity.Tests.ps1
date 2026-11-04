@@ -1,5 +1,80 @@
 Import-Module (Join-Path $PSScriptRoot '..\scripts\HostCapacity.psm1') -Force
 
+Describe 'Subscription-aware VM size selection' {
+    It 'does not restrict the ARM VM size to a fixed list' {
+        $template = Get-Content (Join-Path $PSScriptRoot '..\template\template.json') -Raw | ConvertFrom-Json
+
+        ($template.parameters.vmSize.PSObject.Properties.Name -contains 'allowedValues') | Should Be $false
+    }
+
+    It 'uses a dynamic compatibility filter rather than a fixed SKU shortlist' {
+        $ui = Get-Content (Join-Path $PSScriptRoot '..\template\createUiDefinition.json') -Raw | ConvertFrom-Json
+        $selector = $ui.parameters.steps[0].elements | Where-Object name -eq 'vmSize'
+
+        $selector.type | Should Be 'Microsoft.Compute.SizeSelector'
+        $selector.constraints.allowedSizes | Should Match 'steps'
+        $selector.constraints.allowedSizes | Should Match 'compatibleSizes'
+        $selector.constraints.zone | Should Be "[steps('hosts').zone]"
+        $selector.count | Should Be "[int(steps('hosts').hostCount)]"
+        $ui.parameters.outputs.vmSize | Should Be "[steps('hosts').vmSize]"
+    }
+
+    It 'allows a SKU outside the old shortlist through the preflight parameter binder' {
+        $command = Get-Command (Join-Path $PSScriptRoot '..\scripts\check-host-capacity.ps1')
+        $validateSets = @($command.Parameters['VmSize'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
+
+        $validateSets.Count | Should Be 0
+        $command.Parameters.ContainsKey('ListSizes') | Should Be $true
+    }
+}
+
+Describe 'Test-NestedVirtualizationSku' {
+    $compatibleSku = [pscustomobject]@{
+        Name = 'Standard_D16as_v5'
+        Family = 'standardDASv5Family'
+        Capabilities = @(
+            [pscustomobject]@{ Name = 'CpuArchitectureType'; Value = 'x64' }
+            [pscustomobject]@{ Name = 'HyperVGenerations'; Value = 'V1,V2' }
+            [pscustomobject]@{ Name = 'MemoryGB'; Value = '64' }
+            [pscustomobject]@{ Name = 'vCPUs'; Value = '16' }
+        )
+    }
+
+    It 'accepts a documented nested-virtualization family' {
+        Test-NestedVirtualizationSku -Sku $compatibleSku | Should Be $true
+    }
+
+    It 'rejects a burstable family even when it supports Gen2' {
+        $sku = $compatibleSku | Select-Object *
+        $sku.Family = 'standardBSFamily'
+        Test-NestedVirtualizationSku -Sku $sku | Should Be $false
+    }
+
+    It 'rejects ARM64 instead of assuming Gen2 means nested support' {
+        $sku = $compatibleSku | Select-Object *
+        $sku.Capabilities = @($compatibleSku.Capabilities | Where-Object Name -ne 'CpuArchitectureType') + @([pscustomobject]@{ Name = 'CpuArchitectureType'; Value = 'Arm64' })
+        Test-NestedVirtualizationSku -Sku $sku | Should Be $false
+    }
+
+    It 'rejects unknown capability data' {
+        $sku = $compatibleSku | Select-Object *
+        $sku.Capabilities = @()
+        Test-NestedVirtualizationSku -Sku $sku | Should Be $false
+    }
+
+    It 'rejects a compatible family with less than 32 GB of memory' {
+        $sku = $compatibleSku | Select-Object *
+        $sku.Capabilities = @($compatibleSku.Capabilities | Where-Object Name -ne 'MemoryGB') + @([pscustomobject]@{ Name = 'MemoryGB'; Value = '16' })
+        Test-NestedVirtualizationSku -Sku $sku | Should Be $false
+    }
+
+    It 'rejects a constrained size with fewer than four available vCPUs' {
+        $sku = $compatibleSku | Select-Object *
+        $sku.Capabilities = @($compatibleSku.Capabilities) + @([pscustomobject]@{ Name = 'vCPUsAvailable'; Value = '2' })
+        Test-NestedVirtualizationSku -Sku $sku | Should Be $false
+    }
+}
+
 Describe 'Get-HostCapacitySummary' {
     $baseSku = [pscustomobject]@{
         Name         = 'Standard_E8as_v5'
@@ -86,5 +161,11 @@ Describe 'Get-HostCapacitySummary' {
         $summary.IsSubscriptionRestricted | Should Be $true
         $summary.MaxAdditionalHosts | Should Be 6
         $summary.CanDeploy | Should Be $false
+    }
+
+    It 'does not declare capacity when the selected family quota is missing' {
+        $regionalQuotaOnly = @($usage | Where-Object { $_.Name.Value -eq 'cores' })
+
+        { Get-HostCapacitySummary -Sku $baseSku -Usage $regionalQuotaOnly -Location eastus2 -Zone 2 -HostCount 1 } | Should Throw
     }
 }

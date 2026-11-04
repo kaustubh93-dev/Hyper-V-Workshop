@@ -23,19 +23,8 @@
         "vmSize": {
             "type": "string",
             "defaultValue": "Standard_D8as_v5",
-            "allowedValues": [
-                "Standard_D4s_v5",
-                "Standard_D8s_v5",
-                "Standard_E4s_v5",
-                "Standard_E8s_v5",
-                "Standard_D8s_v4",
-                "Standard_E4s_v4",
-                "Standard_D8as_v5",
-                "Standard_E8as_v5",
-                "Standard_E4as_v5"
-            ],
             "metadata": {
-                "description": "Diskless sizes that support nested virtualization. Run scripts/check-host-capacity.ps1 before deployment; Azure capacity can change between check and allocation."
+                "description": "Nested virtualization is required. The portal and preflight accept documented Dsv5, Dasv5, Esv5 and Easv5 sizes with x64/Gen2 support, at least 4 vCPUs and 32 GB RAM. For direct ARM deployment run scripts/check-host-capacity.ps1 first; ARM cannot query nested-virtualization compatibility itself. Live capacity is not guaranteed."
             }
         },
         "adminUsername": {
@@ -52,10 +41,11 @@
             "allowedValues": [
                 "1",
                 "2",
-                "3"
+                "3",
+                "4"
             ],
             "metadata": {
-                "description": "In eastus2 this subscription is restricted (NotAvailableForSubscription) from zones 1 and 3 for the lab sizes."
+                "description": "Logical availability zone in the selected subscription and region. Offered zones and SKU restrictions vary by subscription; check before deploying."
             }
         },
         "osDiskType": {

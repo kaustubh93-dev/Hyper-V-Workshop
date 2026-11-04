@@ -1,3 +1,24 @@
+function Test-NestedVirtualizationSku {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Sku)
+
+    $families = @('standardDSv5Family', 'standardDASv5Family', 'standardESv5Family', 'standardEASv5Family')
+    if ($Sku.Family -notin $families) { return $false }
+    $capabilities = @{}
+    foreach ($capability in $Sku.Capabilities) {
+        $capabilities[$capability.Name] = $capability.Value
+    }
+    if ($capabilities['CpuArchitectureType'] -ne 'x64' -or
+        'V2' -notin ([string]$capabilities['HyperVGenerations'] -split ',')) { return $false }
+    $memory = 0.0
+    $vcpus = 0
+    if (-not [double]::TryParse([string]$capabilities['MemoryGB'], [Globalization.NumberStyles]::Float,
+        [Globalization.CultureInfo]::InvariantCulture, [ref]$memory)) { return $false }
+    $vcpuValue = if ($capabilities.ContainsKey('vCPUsAvailable')) { $capabilities['vCPUsAvailable'] } else { $capabilities['vCPUs'] }
+    if (-not [int]::TryParse([string]$vcpuValue, [ref]$vcpus)) { return $false }
+    return $memory -ge 32 -and $vcpus -ge 4
+}
+
 function Get-HostCapacitySummary {
     [CmdletBinding()]
     param(
@@ -37,6 +58,11 @@ function Get-HostCapacitySummary {
     if ($usageRows.Count -eq 1 -and $usageRows[0].PSObject.Properties['value']) {
         $usageRows = @($usageRows[0].value)
     }
+    foreach ($quotaName in @($Sku.Family, 'cores')) {
+        if (-not ($usageRows | Where-Object { $_.Name.Value -eq $quotaName })) {
+            throw "Quota '$quotaName' was not returned for $Location. Capacity cannot be verified."
+        }
+    }
     $quotaRows = @($usageRows | Where-Object {
         $_.Name.Value -eq $Sku.Family -or $_.Name.Value -eq 'cores'
     })
@@ -69,4 +95,4 @@ function Get-HostCapacitySummary {
     }
 }
 
-Export-ModuleMember -Function Get-HostCapacitySummary
+Export-ModuleMember -Function Get-HostCapacitySummary, Test-NestedVirtualizationSku

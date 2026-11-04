@@ -1,0 +1,111 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/0.1.2-preview/CreateUIDefinition.MultiVm.json#",
+  "handler": "Microsoft.Azure.CreateUIDef",
+  "version": "0.1.2-preview",
+  "parameters": {
+    "basics": [],
+    "steps": [
+      {
+        "name": "hosts",
+        "label": "Hyper-V hosts",
+        "elements": [
+          {
+            "name": "compatibleSizes",
+            "type": "Microsoft.Solutions.ArmApiControl",
+            "request": {
+              "method": "GET",
+              "path": "[concat(subscription().id, '/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location%20eq%20%27', location(), '%27')]"
+            }
+          },
+          {
+            "name": "hostCount",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Host count",
+            "defaultValue": "2",
+            "constraints": {
+              "required": true,
+              "allowedValues": [
+                { "label": "1", "value": "1" },
+                { "label": "2", "value": "2" },
+                { "label": "3", "value": "3" },
+                { "label": "4", "value": "4" },
+                { "label": "5", "value": "5" },
+                { "label": "6", "value": "6" }
+              ]
+            }
+          },
+          {
+            "name": "zone",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Availability zone",
+            "defaultValue": "2",
+            "toolTip": "Select a logical zone offered in this subscription and region; the size selector below uses this zone.",
+            "constraints": {
+              "required": true,
+              "allowedValues": [
+                { "label": "1", "value": "1" },
+                { "label": "2", "value": "2" },
+                { "label": "3", "value": "3" },
+                { "label": "4", "value": "4" }
+              ]
+            }
+          },
+          {
+            "name": "vmSize",
+            "type": "Microsoft.Compute.SizeSelector",
+            "label": "Host VM size",
+            "toolTip": "Only documented nested-virtualization families Dsv5, Dasv5, Esv5 and Easv5 with x64/Gen2 support, at least 4 vCPUs and 32 GB RAM are offered. Sizes are discovered for your subscription and region, then filtered for the selected zone. Quota and live capacity must still be checked.",
+            "recommendedSizes": ["Standard_D8as_v5", "Standard_D8s_v5", "Standard_E8as_v5"],
+            "constraints": {
+              "allowedSizes": "[if(or(not(empty(steps('hosts').compatibleSizes.nextLink)), empty(filter(filter(steps('hosts').compatibleSizes.value, (sku) => equals(sku.resourceType, 'virtualMachines')), (sku) => and(contains(parse('[\"standarddsv5family\",\"standarddasv5family\",\"standardesv5family\",\"standardeasv5family\"]'), toLower(sku.family)), not(contains(sku.name, '-')), not(empty(filter(sku.capabilities, (cap) => and(equals(cap.name, 'CpuArchitectureType'), equals(cap.value, 'x64'))))), not(empty(filter(sku.capabilities, (cap) => and(equals(cap.name, 'HyperVGenerations'), contains(cap.value, 'V2'))))), not(empty(filter(filter(sku.capabilities, (cap) => equals(cap.name, 'MemoryGB')), (cap) => greaterOrEquals(int(first(split(cap.value, '.'))), 32)))), not(empty(filter(filter(sku.capabilities, (cap) => equals(cap.name, 'vCPUs')), (cap) => greaterOrEquals(int(cap.value), 4)))))))), parse('[\"__NoCompatibleSizeAvailable__\"]'), map(filter(filter(steps('hosts').compatibleSizes.value, (sku) => equals(sku.resourceType, 'virtualMachines')), (sku) => and(contains(parse('[\"standarddsv5family\",\"standarddasv5family\",\"standardesv5family\",\"standardeasv5family\"]'), toLower(sku.family)), not(contains(sku.name, '-')), not(empty(filter(sku.capabilities, (cap) => and(equals(cap.name, 'CpuArchitectureType'), equals(cap.value, 'x64'))))), not(empty(filter(sku.capabilities, (cap) => and(equals(cap.name, 'HyperVGenerations'), contains(cap.value, 'V2'))))), not(empty(filter(filter(sku.capabilities, (cap) => equals(cap.name, 'MemoryGB')), (cap) => greaterOrEquals(int(first(split(cap.value, '.'))), 32)))), not(empty(filter(filter(sku.capabilities, (cap) => equals(cap.name, 'vCPUs')), (cap) => greaterOrEquals(int(cap.value), 4)))))), (sku) => sku.name))]",
+              "zone": "[steps('hosts').zone]"
+            },
+            "osPlatform": "Windows",
+            "count": "[int(steps('hosts').hostCount)]",
+            "visible": true
+          },
+          {
+            "name": "adminUsername",
+            "type": "Microsoft.Common.TextBox",
+            "label": "Host administrator username",
+            "defaultValue": "labadmin",
+            "constraints": { "required": true }
+          },
+          {
+            "name": "adminPassword",
+            "type": "Microsoft.Common.PasswordBox",
+            "label": { "password": "Host administrator password", "confirmPassword": "Confirm password" },
+            "constraints": {
+              "required": true,
+              "regex": "^.{12,123}$",
+              "validationMessage": "Use 12-123 characters and meet Windows password complexity requirements."
+            }
+          },
+          {
+            "name": "bastionSku",
+            "type": "Microsoft.Common.DropDown",
+            "label": "Bastion SKU",
+            "defaultValue": "Developer",
+            "toolTip": "Developer requires Azure sign-in and regional availability. Standard supports shareable links, incurs charges and needs an allowed Standard public IP.",
+            "constraints": {
+              "required": true,
+              "allowedValues": [
+                { "label": "Developer", "value": "Developer" },
+                { "label": "Standard", "value": "Standard" }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "outputs": {
+      "location": "[location()]",
+      "hostCount": "[int(steps('hosts').hostCount)]",
+      "zone": "[steps('hosts').zone]",
+      "vmSize": "[steps('hosts').vmSize]",
+      "adminUsername": "[steps('hosts').adminUsername]",
+      "adminPassword": "[steps('hosts').adminPassword]",
+      "bastionSku": "[steps('hosts').bastionSku]"
+    }
+  }
+}

@@ -4,11 +4,13 @@ On-demand Hyper-V training lab: Windows Server 2025 Azure VMs with nested virtua
 
 ## Deploy
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fkaustubh93-dev%2FHyper-V-Workshop%2Fmain%2Ftemplate%2Ftemplate.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fkaustubh93-dev%2FHyper-V-Workshop%2Fmain%2Ftemplate%2Ftemplate.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2Fkaustubh93-dev%2FHyper-V-Workshop%2Fmain%2Ftemplate%2FcreateUiDefinition.json)
 
 Tip: **Ctrl+click** (Cmd+click on macOS) the button to open the portal in a new tab.
 
-The portal prompts for a resource group, region, and admin password (min 12 chars). Leave everything else at its default; keep **Host Setup Script** and **Mslab Setup Script** empty, because the template downloads them from this repo. The template does the full build on its own:
+Select your subscription, resource group and region first, then choose a host count, zone and VM size in the portal's live size selector. Only documented nested-virtualization families **Dsv5, Dasv5, Esv5 and Easv5** with x64/Gen2 support, at least 4 vCPUs and 32 GB RAM are offered. Individual sizes are discovered dynamically, not limited to the old shortlist. Unknown families are excluded until verified. Supply the host administrator password (min 12 chars). The template does the full build on its own:
+
+For all advanced parameters, use the [plain ARM deployment form](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fkaustubh93-dev%2FHyper-V-Workshop%2Fmain%2Ftemplate%2Ftemplate.json). Its VM size is free text and bypasses the portal filter: run the preflight below before deploying directly with ARM. Leave **Host Setup Script** and **Mslab Setup Script** empty to download the scripts from this repo.
 
 1. Deploys the hosts, network, Bastion and auto-shutdown (~15-20 min until the portal shows **Succeeded**).
 2. Installs Hyper-V and the `InternalNAT` network on each host (run command `setup-hyperv`).
@@ -32,8 +34,8 @@ If the feature isn't registered or permitted, keep **Bastion Sku** = `Developer`
 | Parameter | Default | Notes |
 |---|---|---|
 | Host Count | 2 | 1-6 Hyper-V hosts `HYD-HOST-1..N` |
-| Vm Size | `Standard_D8as_v5` | Nested-virtualization size currently preflight-approved in zone 2; rerun preflight before each deployment |
-| Zone | `2` | In this subscription, zones 1 and 3 have had SKU restrictions in eastus2 |
+| Vm Size | `Standard_D8as_v5` recommendation | Portal discovers compatible sizes within documented nested-Hyper-V families; preflight rejects unverified families and undersized hosts |
+| Zone | `2` | Select a zone offered in your subscription and region; restrictions can change |
 | Bastion Sku | `Developer` | No public IP prerequisite; choose `Standard` for shareable links after its feature precheck passes |
 | Deploy MS Lab | `true` | `false` deploys bare Hyper-V hosts |
 | Mslab Node Count / Memory GB | 3 / 5 | Nodes per host |
@@ -58,6 +60,16 @@ Before ARM or Terraform deployment, check the selected SKU, zone restrictions, a
 ```powershell
 .\scripts\check-host-capacity.ps1 -Location eastus2 -Zone 2 -VmSize Standard_D8as_v5 -HostCount 6 -BastionSku Developer
 ```
+
+To discover nested-Hyper-V-compatible VM sizes for another subscription and region instead of choosing from a fixed size list:
+
+```powershell
+.\scripts\check-host-capacity.ps1 -SubscriptionId '<subscription-id>' -Location eastus2 -Zone 2 -HostCount 2 -ListSizes
+```
+
+This lists only verified Dsv5, Dasv5, Esv5 and Easv5 family members with x64/Gen2 support, at least 4 vCPUs and 32 GB RAM, and shows their zone restrictions and quota-supported additional hosts. A single `-VmSize` check rejects unsupported or unverified sizes. Azure does not expose a universal nested-virtualization capability flag; `HyperVGenerations=V2` alone is not proof of nesting support. Missing quota is reported as unverified. Rerun with `-VmSize` to check Bastion prerequisites too. Quota eligibility is not a capacity reservation, and adding SKU choices cannot bypass regional/family quota limits.
+
+Family support references: [Dsv5](https://learn.microsoft.com/azure/virtual-machines/sizes/general-purpose/dsv5-series), [Dasv5](https://learn.microsoft.com/azure/virtual-machines/sizes/general-purpose/dasv5-series), [Esv5](https://learn.microsoft.com/azure/virtual-machines/sizes/memory-optimized/esv5-series), [Easv5](https://learn.microsoft.com/azure/virtual-machines/sizes/memory-optimized/easv5-series). Increase host RAM when increasing node count or node memory beyond the defaults. If the portal compatibility query fails, returns no candidates, or is paginated, the selector deliberately offers no deployable size; use CLI preflight instead.
 
 The check also verifies public-IP feature/provider prerequisites when `-BastionSku Standard` is selected. Quota and SKU restrictions are checkable; **live compute capacity is not reserved by this preflight and can change before Azure allocates VMs**. If the selected SKU is restricted, try another supported size or zone.
 

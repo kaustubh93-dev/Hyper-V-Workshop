@@ -4,12 +4,9 @@ param(
     [string]$Location = 'eastus2',
     [ValidateSet('1', '2', '3', '4')]
     [string]$Zone = '2',
-    [ValidateSet(
-        'Standard_D8s_v5', 'Standard_D8s_v4', 'Standard_D16s_v5',
-        'Standard_E8s_v5', 'Standard_E8s_v4', 'Standard_E4s_v5', 'Standard_E4s_v4',
-        'Standard_D8as_v5', 'Standard_E8as_v5', 'Standard_E4as_v5', 'Standard_D16as_v5'
-    )]
+    [ValidatePattern('^Standard_[A-Za-z0-9_-]+$')]
     [string]$VmSize = 'Standard_D8as_v5',
+    [switch]$ListSizes,
     [ValidateRange(1, 6)]
     [int]$HostCount = 2,
     [ValidateSet('Developer', 'Standard')]
@@ -31,14 +28,17 @@ if ($SubscriptionId) {
 az account show --only-show-errors --output none
 if ($LASTEXITCODE -ne 0) { throw 'Run az login before checking host capacity.' }
 
-$skuQuery = "[?name=='$VmSize'] | [0]"
-$skuJson = az vm list-skus --location $Location --resource-type virtualMachines --query $skuQuery --output json
+$skuQuery = if ($ListSizes) { '[*]' } else { "[?name=='$VmSize'] | [0]" }
+$skuJson = az vm list-skus --location $Location --resource-type virtualMachines --all --query $skuQuery --output json
 if ($LASTEXITCODE -ne 0) { throw "Could not query VM SKU availability for $Location." }
 $sku = $skuJson | ConvertFrom-Json
 if (-not $sku) { throw "$VmSize is not offered in $Location." }
+if ($ListSizes -and $sku.PSObject.Properties['value']) { $sku = @($sku.value) }
+if (-not $ListSizes -and -not (Test-NestedVirtualizationSku -Sku $sku)) {
+    throw "$VmSize is not verified for this nested-Hyper-V lab. Select a documented Dsv5, Dasv5, Esv5 or Easv5 size with x64/Gen2 support, at least 4 vCPUs and 32 GB RAM."
+}
 
-$usageQuery = "[?name.value=='$($sku.family)' || name.value=='cores']"
-$usageJson = az vm list-usage --location $Location --query $usageQuery --output json
+$usageJson = az vm list-usage --location $Location --output json
 if ($LASTEXITCODE -ne 0) { throw "Could not query vCPU quota for $Location." }
 $usageResponse = $usageJson | ConvertFrom-Json
 if ($usageResponse.PSObject.Properties['value']) {
@@ -47,6 +47,43 @@ if ($usageResponse.PSObject.Properties['value']) {
 else {
     $usage = @($usageResponse)
 }
+
+if ($ListSizes) {
+    Write-Host 'Nested-Hyper-V sizes from documented compatible families, with at least 4 vCPUs and 32 GB RAM. Live capacity is not reserved.' -ForegroundColor Cyan
+    $rows = foreach ($candidate in $sku) {
+        if (-not (Test-NestedVirtualizationSku -Sku $candidate)) { continue }
+        try {
+            $summary = Get-HostCapacitySummary -Sku $candidate -Usage $usage -Location $Location -Zone $Zone -HostCount $HostCount -ErrorAction Stop
+            $memory = $candidate.capabilities | Where-Object name -eq 'MemoryGB' | Select-Object -First 1 -ExpandProperty value
+            [pscustomobject]@{
+                VmSize             = $summary.VmSize
+                Vcpus              = $summary.VcpusPerHost
+                MemoryGB           = $memory
+                ZoneSupported      = $summary.ZoneSupported
+                Restricted         = $summary.IsSubscriptionRestricted
+                MaxAdditionalHosts = $summary.MaxAdditionalHosts
+                CanDeploy          = $summary.CanDeploy
+                UnverifiedReason   = ''
+            }
+        }
+        catch {
+            [pscustomobject]@{
+                VmSize             = $candidate.name
+                Vcpus              = $null
+                MemoryGB           = $null
+                ZoneSupported      = $null
+                Restricted         = $null
+                MaxAdditionalHosts = $null
+                CanDeploy          = $false
+                UnverifiedReason   = $_.Exception.Message
+            }
+        }
+    }
+    $rows | Sort-Object -Property @{ Expression = 'CanDeploy'; Descending = $true }, VmSize | Format-Table -AutoSize
+    Write-Warning 'Only verified Dsv5, Dasv5, Esv5 and Easv5 families are listed; unknown families are excluded. Rerun with -VmSize to also check Bastion prerequisites. Quota eligibility does not guarantee allocation.'
+    return
+}
+
 $summary = Get-HostCapacitySummary -Sku $sku -Usage $usage -Location $Location -Zone $Zone -HostCount $HostCount
 
 Write-Host 'VM capacity preflight (quota and SKU restrictions only; live allocation is not reserved):' -ForegroundColor Cyan
