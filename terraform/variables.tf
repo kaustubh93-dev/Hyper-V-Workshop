@@ -15,8 +15,8 @@ variable "location" {
 }
 
 variable "host_count" {
-  type    = number
-  default = 2
+  type        = number
+  description = "Number of Hyper-V hosts to deploy (1-6)."
 
   validation {
     condition     = var.host_count >= 1 && var.host_count <= 6
@@ -27,7 +27,6 @@ variable "host_count" {
 variable "name_prefix" {
   type        = string
   description = "Hosts are named <prefix>-1..N; kept short so the computer name stays within 15 chars."
-  default     = "HYD-HOST"
 
   validation {
     condition     = length(var.name_prefix) <= 13
@@ -67,12 +66,12 @@ variable "admin_password" {
 
 variable "zone" {
   type        = string
-  description = "In eastus2 this subscription is restricted (NotAvailableForSubscription) from zones 1 and 3 for the lab sizes."
+  description = "Availability zone offered for the selected subscription, region and VM size; verify with scripts/check-host-capacity.ps1."
   default     = "2"
 
   validation {
-    condition     = contains(["1", "2", "3"], var.zone)
-    error_message = "zone must be 1, 2 or 3."
+    condition     = contains(["1", "2", "3", "4"], var.zone)
+    error_message = "zone must be 1, 2, 3 or 4."
   }
 }
 
@@ -128,8 +127,8 @@ variable "subnet_prefix" {
 
 variable "bastion_sku" {
   type        = string
-  description = "Developer is the no-public-IP default. Standard enables shareable links and requires subscription public-IP prerequisites."
-  default     = "Developer"
+  description = "Standard enables shareable links and requires subscription public-IP prerequisites."
+  default     = "Standard"
 
   validation {
     condition     = contains(["Developer", "Standard"], var.bastion_sku)
